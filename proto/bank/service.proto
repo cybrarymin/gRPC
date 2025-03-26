@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package bank;
+import "proto/bank/type/accounts.proto";
+import "proto/bank/type/transactions.proto";
+import "proto/bank/type/exchangeRates.proto";
+import "proto/bank/type/transfer.proto";
+
+
+option go_package = "protogen/pb";
+
+
+service BankService {
+    rpc OpenAccount(BankAccountCreateRequest) returns(BankAccountCreateResponse);
+    rpc CreateTransaction(BankTransactionCreateRequest) returns(BankTransactionCreateResponse);
+    rpc GetCurrentBalance(CurrentBalanceRequest) returns(CurrentBalanceResponse);
+    rpc GetExchangeRate(ExchangeRateRequest) returns(stream ExchangeRateResponse);
+    rpc CreateTransfers(stream BankTransferRequest) returns(stream BankTransferResponse);
+}
+
+

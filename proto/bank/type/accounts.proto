@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package bank;
+import "google/protobuf/timestamp.proto";
+option go_package = "protogen/pb";
+
+enum Currency {
+    Currency_UNSPECEFIED = 0;
+    USD = 1;
+    JPY = 2;
+    CAD = 3;
+    EUR = 4;
+    GBP = 5;
+}
+
+message BankAccountCreateRequest {    
+	string AccountNumber = 1 [ json_name = "account_number"];
+	string AccountName  = 2 [ json_name = "account_name"];
+	Currency Currency = 3 [ json_name = "currency"];
+	double CurrentBalance = 4 [ json_name = "current_balance"]; 
+}
+
+message BankAccountCreateResponse {
+    string AccountUUID = 1 [ json_name = "account_uuid"];
+    string AccountNumber = 2 [ json_name = "account_number"];
+	string AccountName  = 3 [ json_name = "account_name"];
+	Currency Currency = 4 [ json_name = "currency"];
+	double CurrentBalance = 5 [ json_name = "current_balance"]; 
+    google.protobuf.Timestamp CreatedAt = 6 [ json_name = "created_at"];
+    google.protobuf.Timestamp UpdatedAt = 7 [ json_name = "updated_at"];
+}
+
+message CurrentBalanceRequest {
+	string AccountUUID = 1 [json_name="account_uuid"];
+}
+
+message CurrentBalanceResponse {
+	string AccountUUID = 1 [json_name="account_uuid"];
+	Currency Currency = 2 [ json_name = "currency"];
+	double CurrentBalance = 3 [json_name="current_balance"];
+}

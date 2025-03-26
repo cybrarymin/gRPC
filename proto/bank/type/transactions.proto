@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package bank;
+import "google/protobuf/timestamp.proto";
+option go_package = "protogen/pb";
+
+enum TransactionType {
+    TransactionType_UNKNOWN = 0;
+    Refund = 1;
+    Payment = 2;
+    Transfer = 3;
+    Deposit = 4;
+    Withdraw = 5;
+}
+
+
+message BankTransactionCreateRequest {
+	string AccountUUID = 1 [ json_name="account_uuid"];
+	double Amount = 2  [ json_name = "amount" ];
+	TransactionType TransactionType = 3 [ json_name = "transaction_type" ];  
+	string Notes = 4 [ json_name = "note" ];
+}
+
+message BankTransactionCreateResponse {
+    string TransactionUUID = 1 [ json_name="transaction_uuid"];
+	string AccountUUID = 2 [ json_name="account_uuid"];
+	double Amount = 3  [ json_name = "amount" ];
+	TransactionType TransactionType = 4 [ json_name = "transaction_type" ];  
+	string Notes = 5 [ json_name = "note" ];
+    google.protobuf.Timestamp CreatedAt = 6 [ json_name = "created_at" ];
+    google.protobuf.Timestamp UpdatedAt = 7 [ json_name = "updated_at" ];
+    google.protobuf.Timestamp TransactionTimestamp = 8 [ json_name = "transaction_timestamp" ];
+}

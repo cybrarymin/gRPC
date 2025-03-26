@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package bank;
+import "proto/bank/type/accounts.proto";
+import "google/protobuf/timestamp.proto";
+option go_package = "protogen/pb";
+
+
+
+enum TransferStatus {
+    TransferStatus_UNSPECIFIED = 0;
+    Failed = 1;
+    Succes = 2;
+}
+
+message BankTransferRequest {
+    string FromAccount = 1 [ json_name = "from_account" ];
+    string ToAccount = 2  [ json_name = "to_account" ];
+    double Amount = 3 [ json_name = "amount" ];    
+    Currency Currency = 4 [ json_name = "currency" ];
+}
+
+message BankTransferResponse {
+    string FromAccount = 1 [ json_name = "from_account" ];
+    string ToAccount = 2  [ json_name = "to_account" ];
+    double Amount = 3 [ json_name = "amount" ];
+    Currency Currency = 4 [ json_name = "currency" ];
+    TransferStatus TransferStatus = 5 [ json_name = "transfer_status" ];
+    google.protobuf.Timestamp Time = 6 [ json_name = "time" ];
+}   

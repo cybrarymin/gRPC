@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package bank;
+import "proto/bank/type/accounts.proto";
+option go_package = "protogen/pb";
+
+
+message ExchangeRateRequest {
+	Currency FromCurrency = 1 [ json_name ="from_currency" ];
+	Currency ToCurrency = 2 [ json_name ="to_currency" ];
+	double Amount = 3 [ json_name = "amout" ];
+}
+
+message ExchangeRateResponse {
+	string Currency = 1 [ json_name = "currency" ];
+	double Amount = 2 [ json_name = "amount" ];
+}
