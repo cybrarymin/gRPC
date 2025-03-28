@@ -48,7 +48,7 @@ proto:
 .PHONY: build
 build:
 	@go mod tidy
-	@protoc -I ./ --go_out=./ --go-grpc_out=./ proto/*.proto
+	@protoc -I ./ --go_out=./ --go-grpc_out=./ proto/bank/*.proto proto/bank/type/*.proto
 	@GOARCH="amd64" GOOS="linux" go build -ldflags=${Linkerflags} -o ./bin/log-commiter-amd64-linux
 	@GOARCH="arm64" GOOS="darwin" go build -ldflags=${Linkerflags} -o ./bin/log-commiter-arm64-mac
 
@@ -56,7 +56,7 @@ build:
 ## run: run the application
 .PHONY: run 
 run:
-	@go run main.go
+	@go run main.go --log-level=info 
 
 
 #===================================================#

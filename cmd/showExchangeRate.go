@@ -9,13 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	accountBalanceCmd_AccountUUID string
-)
-
-// accountBalanceCmd represents the accountBalance command
-var accountBalanceCmd = &cobra.Command{
-	Use:   "accountBalance",
+// showExchangeRateCmd represents the showExchangeRate command
+var showExchangeRateCmd = &cobra.Command{
+	Use:   "showExchangeRate",
 	Short: "A brief description of your command",
 	Long: `A longer description that spans multiple lines and likely contains examples
 and usage of using your command. For example:
@@ -29,11 +25,11 @@ to quickly create a Cobra application.`,
 		if err != nil {
 			return
 		}
-		cli_service.ShowCurrentBalance(ctx, accountBalanceCmd_AccountUUID)
+		cli_service.ShowExchangeRate(ctx, "USD", "CAD", 10)
 	},
 }
 
 func init() {
-	clientCmd.AddCommand(accountBalanceCmd)
-	accountBalanceCmd.Flags().StringVar(&accountBalanceCmd_AccountUUID, "account_uuid", "", "uuid of the account to get the balance")
+	clientCmd.AddCommand(showExchangeRateCmd)
+
 }

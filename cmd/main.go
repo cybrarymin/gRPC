@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
 
-	client_adapters "github.com/cybrarymin/gRPC/client/adapters"
-	client_services "github.com/cybrarymin/gRPC/client/domains/services"
+	client_adapters "github.com/cybrarymin/gRPC/client/internals/adapters"
+	client_services "github.com/cybrarymin/gRPC/client/internals/domains/services"
 	data "github.com/cybrarymin/gRPC/data/migrations"
 	dbadapters "github.com/cybrarymin/gRPC/server/internals/adapters/driven_adapters/database"
 	adapters "github.com/cybrarymin/gRPC/server/internals/adapters/driving_adapters/grpc"
@@ -101,7 +102,7 @@ func BackgroundJob(nfunc func(), PanicErrMsg string, logger *zerolog.Logger) {
 	}()
 }
 
-func client(ctx context.Context) (*client_services.BankCliService, error) {
+func client() (*client_services.BankCliService, error) {
 
 	var logger zerolog.Logger
 	loglvl, err := zerolog.ParseLevel(FlagLogLevel)
@@ -116,14 +117,29 @@ func client(ctx context.Context) (*client_services.BankCliService, error) {
 		logger = zerolog.New(os.Stdout).With().Timestamp().Logger().Level(loglvl)
 	}
 
-	conn, err := grpc.NewClient("localhost:9090", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	policyConfig, err := os.ReadFile(clientRetryPolicyConfig)
+	if err != nil {
+		if err != io.EOF {
+			logger.Error().Err(err).
+				Str("file_path", clientRetryPolicyConfig).
+				Msg("couldn't read the grpc retry policy configuration")
+			return nil, err
+		}
+	}
+
+	conn, err := grpc.NewClient("localhost:9090",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultServiceConfig(string(policyConfig)))
+
 	if err != nil {
 		logger.Error().Err(err).Msg("couldn't establish connection to the grpc server")
 		return nil, err
 	}
 
+	// create a new circuit breaker for this client
+	newCb := client_adapters.NewCircuitBreaker(CBFailureThreshold, CBOpenRecoveryTime, CBHalfOpenMaxRequests, CBRequestTimeout, &logger)
 	// create new client adapter
-	grpcAdapter, err := client_adapters.NewBankGrpcClientAdapter(conn, &logger)
+	grpcAdapter, err := client_adapters.NewBankGrpcClientAdapter(conn, &logger, newCb)
 	if err != nil {
 		logger.Error().Err(err).Msg("couldn't initialize the grpc adapter")
 		return nil, err

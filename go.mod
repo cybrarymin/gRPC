@@ -6,6 +6,7 @@ toolchain go1.23.7
 
 require (
 	github.com/google/uuid v1.6.0
+	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/rs/zerolog v1.33.0
 	github.com/spf13/cobra v1.9.1
 	github.com/uptrace/bun v1.2.11
