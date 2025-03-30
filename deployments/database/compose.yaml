@@ -5,10 +5,10 @@ services:
     container_name: postgres_container
     image: postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-m.amin24242}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres} # Postgres admin username if POSTGRES_USER env hasn't been set username will be postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-m.amin24242} # Postgres user password. if POSTGRES_PASSWORD hasn't been set password will be m.amin24242
       PGDATA: /data/postgres
-      POSTGRES_DB: ${POSTGRES_DB:-bank}
+      POSTGRES_DB: ${POSTGRES_DB:-bank} # Postgres default database to be created. if it hasn't been set through variable POSTGRES_DB it's gonna be bank
     volumes:
        - postgres:/data/postgres
     ports:

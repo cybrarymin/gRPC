@@ -14,6 +14,7 @@ func (bca *BankGrpcClientAdapter) GetCurrentBalance(ctx context.Context, account
 			AccountUUID: accountID,
 		})
 	})
+
 	if err != nil {
 		return 0, err
 	}

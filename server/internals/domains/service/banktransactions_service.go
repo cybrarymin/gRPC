@@ -8,6 +8,8 @@ import (
 	ports "github.com/cybrarymin/gRPC/server/internals/domains/ports"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 )
 
 type TransactionService struct {
@@ -25,13 +27,8 @@ func NewTransactionService(repoPort ports.TransactionRepositoryPort, accountPort
 }
 
 func (s *TransactionService) NewTransaction(ctx context.Context, accUUID uuid.UUID, amount float64, TRType string, note string) (*domains.BankTransaction, error) {
-	// DEBUG log for new bank transaction process with provided input
-	s.Logger.Debug().
-		Str("account_uuid", accUUID.String()).
-		Float64("amount", amount).
-		Str("transaction_type", TRType).
-		Str("note", note).
-		Msg("starting new bank account transaction process with provided inputs")
+	sCtx, nSpan := otel.Tracer("NewTransaction").Start(ctx, "NewTransaction.service.span")
+	defer nSpan.End()
 
 	nTransaction := &domains.BankTransaction{
 		AccountUUID:          accUUID,
@@ -43,30 +40,16 @@ func (s *TransactionService) NewTransaction(ctx context.Context, accUUID uuid.UU
 		UpdatedAt:            time.Now(),
 	}
 
-	// DEBUG log for new bank transaction object
-	s.Logger.Debug().
-		Str("account_uuid", nTransaction.AccountUUID.String()).
-		Float64("amount", nTransaction.Amount).
-		Str("transaction_type", nTransaction.TransactionType).
-		Str("note", nTransaction.Notes).
-		Time("transaction_timestamp", nTransaction.TransactionTimestamp).
-		Time("created_at", nTransaction.CreatedAt).
-		Time("updated_at", nTransaction.UpdatedAt).
-		Msg("create  bank account transaction object for transaction creation process")
-
-	// DEBUG log before account retrieval
-	s.Logger.Debug().
-		Str("account_uuid", accUUID.String()).
-		Msg("retrieving account details")
-
 	startTime := time.Now()
-	nAccountModel, err := s.GetByID(ctx, accUUID)
+	nAccountModel, err := s.GetByID(sCtx, accUUID)
 	if err != nil {
 		s.Logger.Error().
 			Err(err).
 			Str("account_uuid", accUUID.String()).
 			Dur("duration_ms", time.Since(startTime)).
 			Msg("failed to retrieve account details")
+		nSpan.RecordError(err)
+		nSpan.SetStatus(codes.Error, "failed to get user information")
 		return nil, err
 	}
 
@@ -80,37 +63,12 @@ func (s *TransactionService) NewTransaction(ctx context.Context, accUUID uuid.UU
 		UpdatedAt:      nAccountModel.UpdatedAt,
 	}
 
-	// DEBUG log for account retrieval success
-	s.Logger.Debug().
-		Str("account_uuid", nAccountModel.AccountUUID.String()).
-		Str("account_number", nAccountModel.AccountNumber).
-		Str("account_name", nAccountModel.AccountName).
-		Float64("current_balance", nAccountModel.CurrentBalance).
-		Dur("duration_ms", time.Since(startTime)).
-		Msg("account details retrieved successfully")
-
-	// DEBUG log for balance calculation process
-	s.Logger.Info().
-		Str("account_uuid", nAccountModel.AccountUUID.String()).
-		Str("account_number", nAccountModel.AccountNumber).
-		Str("account_name", nAccountModel.AccountName).
-		Float64("current_balance", nAccountModel.CurrentBalance).
-		Str("transaction_type", nTransaction.TransactionType).
-		Float64("transaction_amount", nTransaction.Amount).
-		Msg("starting balance calculation process..")
-
 	startTime = time.Now()
 	switch nTransaction.TransactionType {
 	case domains.TRDepositType:
 		nAccount.CurrentBalance += amount
-		// DEBUG log for transaction calculation
-		s.Logger.Debug().
-			Float64("previous_balance", nAccount.CurrentBalance-amount).
-			Float64("deposit_amount", amount).
-			Float64("new_balance", nAccount.CurrentBalance).
-			Msg("deposit calculation completed")
 
-		_, err := s.Update(ctx, accUUID, nAccount)
+		_, err := s.Update(sCtx, accUUID, nAccount)
 		if err != nil {
 
 			// ERROR log if update fails
@@ -121,18 +79,15 @@ func (s *TransactionService) NewTransaction(ctx context.Context, accUUID uuid.UU
 				Float64("amount", amount).
 				Float64("attempted_balance", nAccount.CurrentBalance).
 				Msg("failed to update account balance")
+			nSpan.RecordError(err)
+			nSpan.SetStatus(codes.Error, "failed to update account balance during transaction")
 			return nil, err
 		}
 
 	default:
 		nAccount.CurrentBalance -= amount
-		// DEBUG log for transaction calculation
-		s.Logger.Debug().
-			Float64("previous_balance", nAccount.CurrentBalance+amount).
-			Float64("withdrawal_amount", amount).
-			Float64("new_balance", nAccount.CurrentBalance).
-			Msg("deposit calculation completed")
-		_, err := s.Update(ctx, accUUID, nAccount)
+
+		_, err := s.Update(sCtx, accUUID, nAccount)
 
 		if err != nil {
 			// ERROR log if update fails
@@ -143,29 +98,16 @@ func (s *TransactionService) NewTransaction(ctx context.Context, accUUID uuid.UU
 				Float64("amount", amount).
 				Float64("attempted_balance", nAccount.CurrentBalance).
 				Msg("failed to update account balance")
+
+			nSpan.RecordError(err)
+			nSpan.SetStatus(codes.Error, "failed to update account balance during transaction")
 			return nil, err
 		}
 	}
-	// DEBUG log for balance calculation process
-	s.Logger.Info().
-		Str("account_uuid", nAccountModel.AccountUUID.String()).
-		Str("account_number", nAccountModel.AccountNumber).
-		Str("account_name", nAccountModel.AccountName).
-		Float64("current_balance", nAccountModel.CurrentBalance).
-		Str("transaction_type", nTransaction.TransactionType).
-		Float64("transaction_amount", nTransaction.Amount).
-		Dur("duration_ms", time.Since(startTime)).
-		Msg("finished balance calculation and update process..")
 
-	// DEBUG log before transaction creation
 	txnStartTime := time.Now()
-	s.Logger.Debug().
-		Str("account_uuid", nTransaction.AccountUUID.String()).
-		Float64("amount", nTransaction.Amount).
-		Str("transaction_type", nTransaction.TransactionType).
-		Msg("creating transaction record")
 
-	createdTransaction, err := s.CreateTransaction(ctx, nTransaction)
+	createdTransaction, err := s.CreateTransaction(sCtx, nTransaction)
 	if err != nil {
 		s.Logger.Error().
 			Err(err).
@@ -174,15 +116,10 @@ func (s *TransactionService) NewTransaction(ctx context.Context, accUUID uuid.UU
 			Float64("amount", nTransaction.Amount).
 			Dur("duration_ms", time.Since(txnStartTime)).
 			Msg("failed to create transaction record")
+		nSpan.RecordError(err)
+		nSpan.SetStatus(codes.Error, "failed create new transaction")
 		return nil, err
 	}
-
-	// DEBUG log for transaction creation success
-	s.Logger.Debug().
-		Str("transaction_uuid", nTransaction.TransactionUUID.String()).
-		Str("account_uuid", nTransaction.AccountUUID.String()).
-		Dur("duration_ms", time.Since(txnStartTime)).
-		Msg("transaction record created successfully")
 
 	// INFO log for overall success
 	s.Logger.Info().

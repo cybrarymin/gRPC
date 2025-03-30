@@ -7,12 +7,14 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	client_adapters "github.com/cybrarymin/gRPC/client/internals/adapters"
+	client_adapters "github.com/cybrarymin/gRPC/client/adapters"
 	client_services "github.com/cybrarymin/gRPC/client/internals/domains/services"
 	data "github.com/cybrarymin/gRPC/data/migrations"
-	dbadapters "github.com/cybrarymin/gRPC/server/internals/adapters/driven_adapters/database"
+	repoadapters "github.com/cybrarymin/gRPC/server/internals/adapters/driven_adapters/database"
 	adapters "github.com/cybrarymin/gRPC/server/internals/adapters/driving_adapters/grpc"
 	domains "github.com/cybrarymin/gRPC/server/internals/domains/service"
 	"github.com/rs/zerolog"
@@ -43,7 +45,7 @@ func main() {
 	}
 
 	// Create new bankaccountRepository
-	dbCfg := dbadapters.DbConfig{
+	dbCfg := repoadapters.DbConfig{
 		DBMaxConnCount:       FlagDBMaxConnCount,
 		DBMaxIdleConnCount:   FlagDBMaxIdleConnCount,
 		DBMaxIdleConnTimeout: FlagDBMaxIdleConnTimeout,
@@ -51,18 +53,25 @@ func main() {
 		Logger:               &logger,
 	}
 
-	db, err := dbadapters.NewBunDB(ctx, &dbCfg)
+	db, err := repoadapters.NewBunDB(ctx, &dbCfg)
 	if err != nil {
 		logger.Panic().Msgf("couldn't establish database connection: %s", err.Error())
 	}
+
+	// Setup openTelemetry
+	otelShutdown, err := repoadapters.SetupOTelSDK(ctx) // Calling setupOTelSDK to initialize the traceProvider
+	if err != nil {
+		logger.Error().Err(err)
+	}
+
 	// Create new validator
 	v := domains.NewValidator()
 
 	// Create new repository for invoking the CRUD operations on our backend database
-	postgresBankAccountRepo := dbadapters.NewBankAccountRepository(db, &logger)
-	postgresTransactionRepo := dbadapters.NewBankTransactionRepository(db, &logger)
-	postgresExchangeRateRepo := dbadapters.NewBankExchangeRateRepository(db, &logger)
-	postgresTransferRepo := dbadapters.NewBankTransferRepository(db, &logger)
+	postgresBankAccountRepo := repoadapters.NewBankAccountRepository(db, &logger)
+	postgresTransactionRepo := repoadapters.NewBankTransactionRepository(db, &logger)
+	postgresExchangeRateRepo := repoadapters.NewBankExchangeRateRepository(db, &logger)
+	postgresTransferRepo := repoadapters.NewBankTransferRepository(db, &logger)
 
 	// Create new domain bank account service. This domain service is the type of BankAccountGrpcPort so we will give it to GRPC adapter
 	domainBankAccountService := domains.NewBankAccountService(postgresBankAccountRepo, &logger, &v)
@@ -85,21 +94,15 @@ func main() {
 		dRateChanger.ChangeExchangeRates(ctx)
 	}, "dynamic exchange rate changer paniced", &logger)
 
+	shutdownErrs := make(chan error)
+	go GracefulShutdown(shutdownErrs, &logger, grpcAdapter.Stop, otelShutdown)
 	grpcAdapter.Run()
-	defer grpcAdapter.Stop()
 
-}
+	err = <-shutdownErrs
+	if err != nil {
+		logger.Error().Err(err)
+	}
 
-func BackgroundJob(nfunc func(), PanicErrMsg string, logger *zerolog.Logger) {
-	go func() {
-		defer func() {
-			if panicErr := recover(); panicErr != nil {
-				pErr := errors.New(fmt.Sprintln(panicErr))
-				logger.Error().Stack().Err(pErr).Msg(PanicErrMsg)
-			}
-		}()
-		nfunc()
-	}()
 }
 
 func client() (*client_services.BankCliService, error) {
@@ -129,7 +132,9 @@ func client() (*client_services.BankCliService, error) {
 
 	conn, err := grpc.NewClient("localhost:9090",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(string(policyConfig)))
+		grpc.WithDefaultServiceConfig(string(policyConfig)),
+		grpc.WithChainUnaryInterceptor(client_adapters.BasicClientUnaryInterceptor()),
+	)
 
 	if err != nil {
 		logger.Error().Err(err).Msg("couldn't establish connection to the grpc server")
@@ -150,4 +155,37 @@ func client() (*client_services.BankCliService, error) {
 
 	return cli_service, nil
 
+}
+
+func BackgroundJob(nfunc func(), PanicErrMsg string, logger *zerolog.Logger) {
+	go func() {
+		defer func() {
+			if panicErr := recover(); panicErr != nil {
+				pErr := errors.New(fmt.Sprintln(panicErr))
+				logger.Error().Stack().Err(pErr).Msg(PanicErrMsg)
+			}
+		}()
+		nfunc()
+	}()
+}
+
+func GracefulShutdown(shutdownErrs chan error, logger *zerolog.Logger, stopFuncs ...func(context.Context) error) {
+	sChan := make(chan os.Signal, 1)
+
+	signal.Notify(sChan, syscall.SIGINT, syscall.SIGQUIT)
+
+	s := <-sChan
+	logger.Info().Msgf("catched os signal %s", s)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	for _, stopFunc := range stopFuncs {
+		err := stopFunc(ctx)
+		if err != nil {
+			shutdownErrs <- err
+		}
+	}
+	shutdownErrs <- nil
+
+	logger.Info().Msg("stopped the server...")
 }

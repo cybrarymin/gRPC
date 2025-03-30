@@ -66,6 +66,14 @@ func (ad *BankExchangeRateRepository) GetByID(pCtx context.Context, exchUUID uui
 }
 
 func (ad *BankExchangeRateRepository) GetByCurrencies(pCtx context.Context, FromCurrency string, ToCurrency string) (*ExchangeRateModel, error) {
+	if FromCurrency == ToCurrency {
+		return &ExchangeRateModel{
+			FromCurrency: FromCurrency,
+			ToCurrency:   ToCurrency,
+			Rate:         1,
+		}, nil
+	}
+
 	ctx, cancel := context.WithTimeout(pCtx, time.Second*5)
 	defer cancel()
 

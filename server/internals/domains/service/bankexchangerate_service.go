@@ -5,6 +5,8 @@ import (
 
 	domains "github.com/cybrarymin/gRPC/server/internals/domains/ports"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 )
 
 type BankExchangeRateService struct {
@@ -20,9 +22,13 @@ func NewBankExchangeRateService(port domains.BankExchangeRateRepositoryPort, log
 }
 
 func (s *BankExchangeRateService) CalculateRate(ctx context.Context, fromCurrency string, toCurrency string, amount float64) (float64, error) {
-	exRate, err := s.port.GetByCurrencies(ctx, fromCurrency, toCurrency)
+	sCtx, nSpan := otel.Tracer("CalculateRate").Start(ctx, "CalculateRate.service.span")
+	defer nSpan.End()
+
+	exRate, err := s.port.GetByCurrencies(sCtx, fromCurrency, toCurrency)
 	if err != nil {
-		s.logger.Error().Err(err).Msgf("couldn't fetch exchange rate from database for %s to %s", fromCurrency, toCurrency)
+		nSpan.RecordError(err)
+		nSpan.SetStatus(codes.Error, "failed to get exchange rate")
 		return 0, err
 	}
 	return exRate.Rate * amount, nil

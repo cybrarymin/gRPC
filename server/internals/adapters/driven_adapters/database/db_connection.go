@@ -2,7 +2,6 @@ package adapters
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -10,6 +9,8 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/uptrace/bun/extra/bunzerolog"
+	"github.com/uptrace/opentelemetry-go-extra/otelsql"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 )
 
 type DbConfig struct {
@@ -21,7 +22,11 @@ type DbConfig struct {
 }
 
 func NewBunDB(ctx context.Context, cfg *DbConfig) (*bun.DB, error) {
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(cfg.DatabaseDSN)))
+	sqldb := otelsql.OpenDB(
+		pgdriver.NewConnector(pgdriver.WithDSN(cfg.DatabaseDSN)),
+		otelsql.WithAttributes(semconv.DBSystemPostgreSQL),
+	)
+
 	db := bun.NewDB(sqldb, pgdialect.New(), bun.WithDiscardUnknownColumns())
 	db.AddQueryHook(bunzerolog.NewQueryHook(
 		bunzerolog.WithLogger(cfg.Logger),

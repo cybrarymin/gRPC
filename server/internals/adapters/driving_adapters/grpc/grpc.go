@@ -10,7 +10,11 @@ import (
 	domains "github.com/cybrarymin/gRPC/server/internals/domains/ports"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -33,6 +37,12 @@ type GrpcAdapter struct {
 }
 
 func (ad *GrpcAdapter) OpenAccount(ctx context.Context, req *pb.BankAccountCreateRequest) (*pb.BankAccountCreateResponse, error) {
+	nlogger := ad.logger.With().Interface("request-id", ctx.Value(RpcCtxRequestIDKey)).Logger()
+	ad.logger = &nlogger
+
+	sCtx, nSpan := otel.Tracer("OpenAccount").Start(ctx, "OpenAccount.span")
+	defer nSpan.End()
+
 	ad.logger.Info().
 		Str("account_name", req.AccountName).
 		Str("account_number", req.AccountNumber).
@@ -50,15 +60,18 @@ func (ad *GrpcAdapter) OpenAccount(ctx context.Context, req *pb.BankAccountCreat
 		ad.logger.Error().
 			Interface("validation_errors", ad.port.ValidatorErrors()).
 			Msg("account creation validation failed")
+		nSpan.SetStatus(codes.Error, "failed to validate user input")
 		return nil, StatusCheck(ad.port.ValidatorErrors())
 	}
 
-	createdAcc, err := ad.port.OpenAccount(ctx, req.AccountName, req.AccountNumber, req.Currency.String(), req.CurrentBalance)
+	createdAcc, err := ad.port.OpenAccount(sCtx, req.AccountName, req.AccountNumber, req.Currency.String(), req.CurrentBalance)
 	if err != nil {
 		ad.logger.Error().Err(err).
 			Str("account_name", req.AccountName).
 			Str("account_number", req.AccountNumber).
 			Msg("failed to create account")
+		nSpan.RecordError(err)
+		nSpan.SetStatus(codes.Error, "failed to create account")
 		return nil, StatusCheck(err)
 	}
 
@@ -78,6 +91,12 @@ func (ad *GrpcAdapter) OpenAccount(ctx context.Context, req *pb.BankAccountCreat
 }
 
 func (ad *GrpcAdapter) GetCurrentBalance(ctx context.Context, req *pb.CurrentBalanceRequest) (*pb.CurrentBalanceResponse, error) {
+	nlogger := ad.logger.With().Interface("request-id", ctx.Value(RpcCtxRequestIDKey)).Logger()
+	ad.logger = &nlogger
+
+	sCtx, nSpan := otel.Tracer("GetCurrentBalance").Start(ctx, "GetCurrentBalance.span")
+	defer nSpan.End()
+
 	ad.logger.Info().
 		Str("account_uuid", req.AccountUUID).
 		Msg("received balance check request")
@@ -93,14 +112,19 @@ func (ad *GrpcAdapter) GetCurrentBalance(ctx context.Context, req *pb.CurrentBal
 		ad.logger.Error().
 			Interface("validation_errors", ad.port.ValidatorErrors()).
 			Msg("balance check validation failed")
+
+		nSpan.SetStatus(codes.Error, "failed to validate user input")
 		return nil, StatusCheck(ad.port.ValidatorErrors())
 	}
 
-	balance, currency, err := ad.port.GetCurrentBalance(ctx, accUUID)
+	balance, currency, err := ad.port.GetCurrentBalance(sCtx, accUUID)
 	if err != nil {
 		ad.logger.Error().Err(err).
 			Str("account_uuid", req.AccountUUID).
 			Msg("failed to get account balance")
+
+		nSpan.RecordError(err)
+		nSpan.SetStatus(codes.Error, "failed to validate user input")
 		return nil, StatusCheck(err)
 	}
 
@@ -109,6 +133,16 @@ func (ad *GrpcAdapter) GetCurrentBalance(ctx context.Context, req *pb.CurrentBal
 		Float64("balance", balance).
 		Str("currency", currency).
 		Msg("balance retrieved successfully")
+
+	if err := grpc.SetHeader(sCtx, metadata.Pairs("version", "test-v1")); err != nil {
+		ad.logger.Error().Err(err).
+			Msg("couldn't add metadata to the gRPC server response")
+
+		nSpan.RecordError(err)
+		nSpan.SetStatus(codes.Error, "couldn't set grpc metadata")
+		return nil, err
+	}
+
 	return &pb.CurrentBalanceResponse{
 		AccountUUID:    req.AccountUUID,
 		Currency:       pb.Currency(pb.Currency_value[currency]),
@@ -117,6 +151,12 @@ func (ad *GrpcAdapter) GetCurrentBalance(ctx context.Context, req *pb.CurrentBal
 }
 
 func (ad *GrpcAdapter) CreateTransaction(ctx context.Context, req *pb.BankTransactionCreateRequest) (*pb.BankTransactionCreateResponse, error) {
+	nlogger := ad.logger.With().Interface("request-id", ctx.Value(RpcCtxRequestIDKey)).Logger()
+	ad.logger = &nlogger
+
+	sCtx, nSpan := otel.Tracer("CreateTransaction").Start(ctx, "CreateTransaction.span")
+	defer nSpan.End()
+
 	ad.logger.Info().
 		Str("account_uuid", req.AccountUUID).
 		Float64("amount", req.Amount).
@@ -137,16 +177,19 @@ func (ad *GrpcAdapter) CreateTransaction(ctx context.Context, req *pb.BankTransa
 		ad.logger.Error().
 			Interface("validation_errors", ad.port.ValidatorErrors()).
 			Msg("transaction creation validation failed")
+		nSpan.SetStatus(codes.Error, "failed to validate user input")
 		return nil, StatusCheck(ad.port.ValidatorErrors())
 	}
 
-	nTransaction, err := ad.port.NewTransaction(ctx, acUUID, req.Amount, req.TransactionType.String(), req.Notes)
+	nTransaction, err := ad.port.NewTransaction(sCtx, acUUID, req.Amount, req.TransactionType.String(), req.Notes)
 	if err != nil {
 		ad.logger.Error().Err(err).
 			Str("account_uuid", req.AccountUUID).
 			Float64("amount", req.Amount).
 			Str("type", req.TransactionType.String()).
 			Msg("failed to create transaction")
+		nSpan.RecordError(err)
+		nSpan.SetStatus(codes.Error, "failed to create transaction")
 		return nil, StatusCheck(err)
 	}
 
@@ -168,6 +211,11 @@ func (ad *GrpcAdapter) CreateTransaction(ctx context.Context, req *pb.BankTransa
 }
 
 func (ad *GrpcAdapter) GetExchangeRate(req *pb.ExchangeRateRequest, stream grpc.ServerStreamingServer[pb.ExchangeRateResponse]) error {
+	nlogger := ad.logger.With().Interface("request-id", stream.Context().Value(RpcCtxRequestIDKey)).Logger()
+	ad.logger = &nlogger
+
+	sCtx, nSpan := otel.Tracer("GetExchangeRate").Start(stream.Context(), "GetExchangeRate.span")
+	defer nSpan.End()
 
 	ad.logger.Info().
 		Str("from_currency", req.FromCurrency.String()).
@@ -187,16 +235,19 @@ func (ad *GrpcAdapter) GetExchangeRate(req *pb.ExchangeRateRequest, stream grpc.
 		ad.logger.Error().
 			Interface("validation_errors", ad.port.ValidatorErrors()).
 			Msg("exchange rate validation failed")
+		nSpan.SetStatus(codes.Error, "failed to validate user input")
 		return StatusCheck(ad.port.ValidatorErrors())
 	}
 
-	total, err := ad.port.CalculateRate(stream.Context(), req.FromCurrency.String(), req.ToCurrency.String(), req.Amount)
+	total, err := ad.port.CalculateRate(sCtx, req.FromCurrency.String(), req.ToCurrency.String(), req.Amount)
 	if err != nil {
 		ad.logger.Error().Err(err).
 			Str("from_currency", req.FromCurrency.String()).
 			Str("to_currency", req.ToCurrency.String()).
 			Float64("amount", req.Amount).
 			Msg("failed to calculate exchange rate")
+		nSpan.RecordError(err)
+		nSpan.SetStatus(codes.Error, "failed to calculate exchange rate")
 		return StatusCheck(err)
 	}
 	resp := &pb.ExchangeRateResponse{
@@ -222,6 +273,12 @@ func (ad *GrpcAdapter) GetExchangeRate(req *pb.ExchangeRateRequest, stream grpc.
 
 func (ad *GrpcAdapter) CreateTransfers(stream grpc.BidiStreamingServer[pb.BankTransferRequest, pb.BankTransferResponse]) error {
 	ctx := stream.Context()
+	nlogger := ad.logger.With().Interface("request-id", ctx.Value(RpcCtxRequestIDKey)).Logger()
+	ad.logger = &nlogger
+
+	sCtx, nSpan := otel.Tracer("CreateTransfers").Start(ctx, "CreateTransfers.span")
+	defer nSpan.End()
+
 	ad.logger.Info().Msg("started bidirectional transfer stream")
 
 	for {
@@ -263,16 +320,19 @@ func (ad *GrpcAdapter) CreateTransfers(stream grpc.BidiStreamingServer[pb.BankTr
 				ad.logger.Error().
 					Interface("validation_errors", ad.port.ValidatorErrors()).
 					Msg("transfer validation failed")
+				nSpan.SetStatus(codes.Error, "failed to validate user input")
 				return StatusCheck(ad.port.ValidatorErrors())
 			}
 
-			nTransfer, err := ad.port.TransferMoney(stream.Context(), fromAccountUUID, toAccountUUID, req.Currency.String(), req.Amount)
+			nTransfer, err := ad.port.TransferMoney(sCtx, fromAccountUUID, toAccountUUID, req.Currency.String(), req.Amount)
 			if err != nil {
 				ad.logger.Error().Err(err).
 					Str("from_account", req.FromAccount).
 					Str("to_account", req.ToAccount).
 					Float64("amount", req.Amount).
 					Msg("money transfer failed")
+				nSpan.RecordError(err)
+				nSpan.SetStatus(codes.Error, "failed to transfer money")
 				return StatusCheck(err)
 			}
 
@@ -300,7 +360,19 @@ func (ad *GrpcAdapter) CreateTransfers(stream grpc.BidiStreamingServer[pb.BankTr
 }
 
 func NewGrpcAdapter(grpcHost string, grpcPort string, logger *zerolog.Logger, port GrpcPortReference) *GrpcAdapter {
-	srv := grpc.NewServer()
+	otelHandler := otelgrpc.NewServerHandler()
+	opts := []grpc.ServerOption{
+		grpc.StatsHandler(otelHandler),
+		grpc.ChainUnaryInterceptor(
+			requestIDGenerator(),
+			logReqUnaryInterceptor(logger),
+		),
+		grpc.ChainStreamInterceptor(
+			BasicStreamServerInterceptor(),
+		),
+	}
+	srv := grpc.NewServer(opts...)
+
 	ad := &GrpcAdapter{
 		port:     port,
 		grpcPort: grpcPort,
@@ -311,6 +383,7 @@ func NewGrpcAdapter(grpcHost string, grpcPort string, logger *zerolog.Logger, po
 	pb.RegisterBankServiceServer(srv, ad)
 	reflection.Register(srv)
 	return ad
+
 }
 
 func (ad *GrpcAdapter) Run() error {
@@ -330,23 +403,21 @@ func (ad *GrpcAdapter) Run() error {
 	return nil
 }
 
-func (ad *GrpcAdapter) Stop() {
+func (ad *GrpcAdapter) Stop(ctx context.Context) error {
 	ad.logger.Info().Msg("gracefully stopping gRPC server")
 
-	// Give ongoing requests a chance to complete
-	stopped := make(chan struct{})
+	stopped := make(chan error)
 	go func() {
 		ad.Srv.GracefulStop()
 		close(stopped)
 	}()
 
-	// Set a timeout for graceful shutdown
-	t := time.NewTimer(10 * time.Second)
 	select {
 	case <-stopped:
 		ad.logger.Info().Msg("gRPC server stopped gracefully")
-	case <-t.C:
-		ad.logger.Warn().Msg("forcing gRPC server to stop")
+	case <-ctx.Done():
+		ad.logger.Warn().Msg("timeout during graceful shutdown, forcing gRPC server to stop")
 		ad.Srv.Stop()
 	}
+	return nil
 }
